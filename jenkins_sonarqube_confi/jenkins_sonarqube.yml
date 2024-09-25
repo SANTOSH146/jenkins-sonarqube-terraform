@@ -1,0 +1,98 @@
+---
+- hosts: all
+  become: true
+   # Change to your desired admin password
+  tasks:
+    - name: Ensure Docker is installed
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+    - name: Install Java (required for Jenkins CLI)
+      apt:
+        name: default-jre
+        state: present
+        update_cache: yes
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Pull Jenkins Docker image
+      docker_image:
+        name: jenkins/jenkins
+        tag: latest
+        source: pull
+
+    - name: Set permissions on Jenkins home directory
+      file:
+        path: /var/jenkins_home
+        state: directory
+        owner: "1000"
+        group: "1000"
+        mode: "0755"
+        recurse: yes
+
+    - name: Run Jenkins container
+      docker_container:
+        name: jenkins
+        image: jenkins/jenkins:latest
+        state: started
+        ports:
+          - "8080:8080"
+          - "50000:50000"
+        volumes:
+          - "/var/jenkins_home:/var/jenkins_home"
+
+    - name: Wait for Jenkins to be available
+      uri:
+        url: http://localhost:8080/login
+        return_content: yes
+      register: jenkins_login_page
+      until: jenkins_login_page.status == 200
+      retries: 15
+      delay: 10
+
+    - name: Get Jenkins initial admin password
+      shell: "docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword"
+      register: jenkins_initial_password
+
+    - name: Create Jenkins admin user using Groovy script
+      shell: |
+        docker exec jenkins bash -c 'echo "jenkins.model.Jenkins.instance.securityRealm.createAccount(\"{{ jenkins_admin_username }}\", \"{{ jenkins_admin_password }}\")" | java -jar /var/jenkins_home/jenkins-cli.jar -s http://localhost:8080/ groovy ='
+      args:
+        executable: /bin/bash
+
+    - name: Install Jenkins plugins
+      shell: |
+        docker exec jenkins bash -c 'java -jar /var/jenkins_home/jenkins-cli.jar -s http://localhost:8080/ install-plugin {{ item }} --username {{ jenkins_admin_username }} --password {{ jenkins_admin_password }}'
+        docker exec jenkins bash -c 'java -jar /var/jenkins_home/jenkins-cli.jar -s http://localhost:8080/ safe-restart'
+      loop:
+        - git
+        - sonar
+        - pipeline
+        - blueocean
+      args:
+        executable: /bin/bash
+
+    - name: Create Jenkins pipeline job
+      shell: |
+        echo '<pipeline>
+          <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition">
+            <script>
+              pipeline {
+                agent any
+                stages {
+                  stage("Build") { steps { echo "Building..." } }
+                  stage("Test") { steps { echo "Testing..." } }
+                  stage("SonarQube") { steps { withSonarQubeEnv("SonarQube") { sh "mvn sonar:sonar" } } }
+                }
+              }
+            </script>
+          </definition>
+        </pipeline>' > /var/jenkins_home/jobs/my_pipeline_job/config.xml
+      args:
+        executable: /bin/bash

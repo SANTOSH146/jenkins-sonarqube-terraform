@@ -1,0 +1,5 @@
+# Ignore Terraform directory
+.terraform/
+
+# Ignore secrets file
+secrets.txt

@@ -1,0 +1,18 @@
+{
+    "builders": [{
+      "type": "amazon-ebs",
+      "region": "us-east-1",
+      "source_ami":  "ami-0e86e20dae9224db8",
+      "instance_type": "t2.micro",
+      "ssh_username": "ubuntu",
+      "ami_name": "custom-jenkins-sonarqube-ami",
+      "vpc_id": "vpc-01dda2d84eb37a515",
+       "subnet_id": "subnet-046870f0b9827f0ac"
+    }],
+    "provisioners": [
+      {
+        "type": "ansible",
+        "playbook_file": "/home/santosh/ansible/ami_setup.yml"
+      }
+    ]
+  }
